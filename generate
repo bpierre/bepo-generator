@@ -1,0 +1,251 @@
+#!/bin/bash
+
+DEBUG_MODE=false
+LOG_FILE=generate.log
+DEFAULT_DOCKER_IMAGE=bpierre/bepo
+DOCKER_IMAGE="$DEFAULT_DOCKER_IMAGE"
+PLATFORM=$(python -c "import sys;print(sys.platform)")
+DISTRIBUTION=$(python -c "import platform;print(platform.linux_distribution()[0])")
+
+# Run a command and log its output in a file or on STDOUT,
+# depending on the value of DEBUG_MODE.
+run() {
+  if $DEBUG_MODE; then
+    "$@"
+  else
+    "$@" &>"$LOG_FILE"
+  fi
+}
+
+get_abs_filename() {
+  python -c "import os,sys; print os.path.realpath(sys.argv[1])" "$1"
+}
+
+# http://djm.me/ask
+ask() {
+  while true; do
+
+    if [ "${2:-}" = "Y" ]; then
+      prompt="Y/n"
+      default=Y
+    elif [ "${2:-}" = "N" ]; then
+      prompt="y/N"
+      default=N
+    else
+      prompt="y/n"
+      default=
+    fi
+
+    # Ask the question - use /dev/tty in case stdin is redirected from
+    # somewhere else
+    read -p "$1 [$prompt] " REPLY </dev/tty
+
+    # Default?
+    if [ -z "$REPLY" ]; then
+      REPLY=$default
+    fi
+
+    # Check if the reply is valid
+    case "$REPLY" in
+      Y*|y*) return 0 ;;
+      N*|n*) return 1 ;;
+    esac
+
+  done
+}
+
+# Colors: check if stdout is a terminal and supports colors
+if test -t 1; then
+  ncolors=$(tput colors)
+  if [ -n "$ncolors" ] && [ $ncolors -ge 8 ]; then
+    normal="$(tput sgr0)"
+    red="$(tput setaf 1)"
+    green="$(tput setaf 2)"
+    yellow="$(tput setaf 3)"
+    blue="$(tput setaf 4)"
+    magenta="$(tput setaf 5)"
+    cyan="$(tput setaf 6)"
+    white="$(tput setaf 7)"
+  fi
+fi
+
+pretty_echo() {
+  infostr=""
+  if [ $# -ge 2 ] && [ "$2" != "" ]; then
+    infostr="$2 "
+  fi
+  if [ $# -ge 3 ] && [ "$3" != "" ]; then
+    infostr="${infostr}${yellow}${3}${normal} "
+  fi
+  if [ "$infostr" != "" ]; then
+    echo -n "$1 $infostr"
+  fi
+}
+
+echo_check() {
+  pretty_echo " ${green}✓${normal}" "$@"
+  echo ""
+}
+
+echo_err() {
+  pretty_echo " ${red}✗${normal}" "$@"
+  echo ""
+}
+
+echo_wait() {
+  tput sc
+  echo_wait_par1=$1
+  pretty_echo " ${blue}…${normal}" "$@"
+}
+
+echo_wait_stop_ok() {
+  tput rc
+  tput el
+  echo_check "$echo_wait_par1" "$1"
+}
+
+echo_wait_stop_nok() {
+  tput rc
+  tput el
+  echo_err "$echo_wait_par1" "$1"
+}
+
+show_help() {
+cat << EOF
+Usage: ./${0##*/} [-hcd] [-i DOCKER_IMAGE] <EXPORT_DIRECTORY>
+
+    -h              Display this help screen and exit.
+    -c              Remove the containers and images created by the script.
+    -d              Verbose output for debugging purposes.
+    -i DOCKER_IMAGE Change the default Docker image to another one (useful for debugging).
+EOF
+}
+
+clean_all() {
+  echo
+  if ask "This action will remove the image $DOCKER_IMAGE and the containers created from it. Are you sure?" N; then
+
+    echo
+
+    existing_containers=$(docker ps -aq --filter="ancestor=$DOCKER_IMAGE")
+    if [ -z "$existing_containers" ]; then
+      echo "There is no containers created from $DOCKER_IMAGE."
+      echo
+    else
+      echo "Deleting the containers…"
+      echo
+      docker rm $existing_containers
+      echo
+    fi
+
+    existing_images=$(docker images -aq --filter="reference=$DOCKER_IMAGE")
+    if [ -z "$existing_images" ]; then
+      echo "There is no image named $DOCKER_IMAGE."
+    else
+      echo "Deleting the image ${DOCKER_IMAGE}…"
+      echo
+      docker rmi $existing_images
+      echo
+    fi
+  fi
+  exit 0
+}
+
+# Docker auto installation
+docker_or_exit() {
+  if command -v docker >/dev/null 2>&1; then
+    return 0
+  fi
+  if ask "Docker not installed. Do you want to install it now?"; then
+      wget -qO- https://get.docker.com/ | sh
+
+      if [ "$PLATFORM" = "darwin" ]; then
+        # TODO: OS X support
+        echo "Docker is probably installed now."
+
+      elif [ "$PLATFORM" = "linux2" ]; then
+        sudo usermod -aG docker `whoami`
+        echo "Please logout and login again, then launch the script again."
+      fi
+
+      exit 0
+  fi
+  echo "Exiting."
+  exit 0
+}
+
+# The platform can only be "darwin" or "linux2".
+platform_or_exit() {
+  if [ "$PLATFORM" != "darwin" ] && [ "$PLATFORM" != "linux2" ]; then
+    echo "Unsupported platform: ${PLATFORM}." 1>&2
+    exit 1
+  fi
+  return 0
+}
+
+check_requirements() {
+  platform_or_exit && echo_check "Platform -" "$PLATFORM"
+  docker_or_exit && echo_check "Docker version -" "$(docker --version | awk '{$1="";$0=$0;$1=$1;print $0}')"
+}
+
+echo
+
+# Options
+OPTIND=1
+while getopts "hcdi:" opt; do
+  case "$opt" in
+    h)
+      show_help
+      exit 0
+      ;;
+    c)
+      check_requirements
+      clean_all
+      ;;
+    i)
+      DOCKER_IMAGE=$OPTARG
+      ;;
+    d)
+      DEBUG_MODE=true
+      ;;
+    \?)
+      show_help >&2
+      exit 1
+      ;;
+    esac
+done
+shift "$((OPTIND-1))"
+
+# Set the default branch if the user didn’t set anything
+EXPORT_DIR="$@"
+
+if [ -z "$EXPORT_DIR" ]; then
+  echo_err "You need to specify an export directory!"
+  echo
+  show_help
+  exit 1
+fi
+
+EXPORT_DIR=$(get_abs_filename "$EXPORT_DIR")
+
+# Options parsed, check the requirements first
+check_requirements
+
+echo_check "Docker Image Name -" "$DOCKER_IMAGE"
+
+if [ "$DOCKER_IMAGE" = "$DEFAULT_DOCKER_IMAGE" ]; then
+  echo_wait "Docker Image Update -" "downloading…"
+  # run docker pull "$DEFAULT_DOCKER_IMAGE" && echo_wait_stop_ok "up to date" || { echo_wait_stop_nok "error"; exit 1 }
+  run docker pull "$DEFAULT_DOCKER_IMAGE" && echo_wait_stop_ok "up to date" || { echo_wait_stop_nok "error"; exit 1; }
+fi
+
+CONTAINER_EXISTS=$(docker ps -a | grep "$CID")
+echo_check "Export Directory -" "$EXPORT_DIR"
+
+echo_wait "Keyboard Layout Generation -" "in progress…"
+
+run docker run --rm -v $EXPORT_DIR:/export $DOCKER_IMAGE
+
+echo_wait_stop_ok "done"
+
+echo_check "Keyboard layouts exported -" "$EXPORT_DIR"

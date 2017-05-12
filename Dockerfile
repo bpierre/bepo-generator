@@ -11,5 +11,4 @@ VOLUME /pilotes
 COPY . /pilotes
 COPY ./docker/generate.sh /generate.sh
 
-# CMD /generate.sh
 CMD /generate.sh

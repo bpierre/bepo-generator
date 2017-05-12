@@ -24,15 +24,18 @@ mkdir -p "$BUILD_DIR/configGenerator/results"
 
 cd "$BUILD_DIR/configGenerator"
 
+echo ""
 echo "Generate layouts…"
 ./genAll.sh
 
+echo ""
 echo "Copy layouts…"
-./cpAll.sh
 
+./cpAll.sh
 cp -r "./results" "$EXPORT_DIR/results"
 cp -r "../macosx" "$EXPORT_DIR/macos"
 cp -r "../windows" "$EXPORT_DIR/windows"
 cp -r "../keymaps" "$EXPORT_DIR/linux"
 
-echo "\nDone."
+echo ""
+echo "Done."

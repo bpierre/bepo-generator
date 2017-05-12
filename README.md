@@ -2,9 +2,31 @@
 
 ## How to use it
 
-### Docker image
+### Using the `generate` command (requires Docker)
 
-It is the simplest way as all the dependencies are already in the Docker image, so that a single command can be used to generate the layouts.
+It is the simplest way to generate the layouts as a single command is required to do everything.
+
+Note: If Docker is not installed, the command will ask if you want to install it.
+
+Example: generate the layouts in the `exported_layouts` directory.
+
+```
+./generate exported_layouts
+```
+
+Command parameters:
+
+```
+Usage: ./generate [-hcd] [-i DOCKER_IMAGE] <EXPORT_DIRECTORY>
+
+    -h              Display this help screen and exit.
+    -c              Remove the containers and images created by the script.
+    -d              Verbose output for debugging purposes.
+    -i DOCKER_IMAGE Change the default Docker image to another one (useful for debugging).
+```
+
+### Using the Docker image directly (advanced users)
+
 
 You need to run this container with a mounted volume to export the generated keyboard layouts:
 
